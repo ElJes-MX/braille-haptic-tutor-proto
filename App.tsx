@@ -82,8 +82,11 @@ const App: React.FC = () => {
 
     recognition.onresult = async (event: any) => {
       const transcript = event.results[0][0].transcript;
-      const firstWord = transcript.split(' ')[0]; 
+      // Sanitize input: Trim whitespace and take the first token
+      const firstWord = transcript.trim().split(' ')[0]; 
       
+      if (!firstWord) return;
+
       setCurrentWord(firstWord);
       setDisplayMode('spanish');
       
@@ -106,15 +109,16 @@ const App: React.FC = () => {
     setIsTranslating(true);
     try {
       const translation = await translateWord(word);
-      setTranslatedWord(translation);
-      setIsTranslating(false);
       
-      // Check for failure tag (starts with bracket like [Mock] or [Error])
-      if (translation.startsWith('[')) {
-          speak("No se pudo traducir la palabra, pero aquí la muestro.", 'es-ES');
+      if (translation === "UNAVAILABLE") {
+        setTranslatedWord(word); // Fallback to showing original word if needed, or keep empty
+        speak("Lo siento, no conozco la traducción de esa palabra todavía.", 'es-ES');
+        // Keep display mode in Spanish as translation failed
+        setDisplayMode('spanish');
       } else {
-          // Speak with correct intonation for English result
-          speakMixed("Traducción lista. En inglés:", translation, 'en-US');
+        setTranslatedWord(translation);
+        setIsTranslating(false);
+        speakMixed("Traducción lista. En inglés:", translation, 'en-US');
       }
       
     } catch (err) {
@@ -126,19 +130,21 @@ const App: React.FC = () => {
 
   const toggleLanguage = () => {
     const newMode = displayMode === 'spanish' ? 'english' : 'spanish';
+    
+    // Prevent switching if no valid translation
+    if (newMode === 'english' && (!translatedWord || translatedWord === "UNAVAILABLE")) {
+        speak("Traducción no disponible.", 'es-ES');
+        return;
+    }
+
     setDisplayMode(newMode);
     
     const textToRead = newMode === 'spanish' ? currentWord : translatedWord;
     const targetLang = newMode === 'spanish' ? 'es-ES' : 'en-US';
     
     if (textToRead) {
-        // If text is a failure message (starts with [), speak explanation in Spanish
-        if (textToRead.startsWith('[')) {
-             speak(`Modo ${newMode === 'spanish' ? 'Español' : 'Inglés'}. La traducción no está disponible.`, 'es-ES');
-        } else {
-             const intro = `Cambiando a ${newMode === 'spanish' ? 'Español' : 'Inglés'}`;
-             speakMixed(intro, textToRead, targetLang);
-        }
+        const intro = `Cambiando a ${newMode === 'spanish' ? 'Español' : 'Inglés'}`;
+        speakMixed(intro, textToRead, targetLang);
     } else {
       speak(`Cambiando a ${newMode === 'spanish' ? 'Español' : 'Inglés'}.`, 'es-ES');
     }
@@ -153,7 +159,7 @@ const App: React.FC = () => {
   }, []);
 
   const activeText = displayMode === 'spanish' ? currentWord : translatedWord;
-  const brailleData = getBrailleData(activeText);
+  const brailleData = getBrailleData(activeText || "");
 
   return (
     <main className="flex flex-col h-full bg-high-contrast-bg text-high-contrast-text p-4 md:p-8 overflow-y-auto">
@@ -214,7 +220,7 @@ const App: React.FC = () => {
                     </h2>
                     <button 
                         onClick={() => {
-                            if (activeText.startsWith('[')) {
+                            if (activeText === "UNAVAILABLE") {
                                 speak("Texto no disponible.", 'es-ES');
                             } else {
                                 speak(activeText, displayMode === 'spanish' ? 'es-ES' : 'en-US');
@@ -228,7 +234,7 @@ const App: React.FC = () => {
                 </div>
 
                 <div className="flex gap-4 mt-4 w-full justify-center">
-                     {translatedWord && (
+                     {translatedWord && translatedWord !== "UNAVAILABLE" && (
                          <button
                             onClick={toggleLanguage}
                             className={`

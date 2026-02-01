@@ -5,29 +5,27 @@ const apiKey = process.env.API_KEY || '';
 // Initialize client only if key exists (handled in component)
 const getClient = () => new GoogleGenAI({ apiKey });
 
-// Expanded Fallback dictionary for demo purposes or when API is unavailable
+// Dictionary keys must be normalized (lowercase, no accents, no punctuation)
 const MOCK_DICTIONARY: Record<string, string> = {
   // Basics
   "hola": "hello",
   "adios": "goodbye",
-  "adiós": "goodbye",
   "gracias": "thank you",
   "por favor": "please",
   "si": "yes",
-  "sí": "yes",
   "no": "no",
   
   // Objects & Technology
   "computadora": "computer",
   "ordenador": "computer",
-  "teléfono": "phone",
+  "telefono": "phone",
   "celular": "cellphone",
   "mesa": "table",
   "silla": "chair",
   "libro": "book",
   "cuaderno": "notebook",
-  "lápiz": "pencil",
-  "bolígrafo": "pen",
+  "lapiz": "pencil",
+  "boligrafo": "pen",
   "pluma": "pen",
   "mochila": "backpack",
   "escuela": "school",
@@ -35,7 +33,7 @@ const MOCK_DICTIONARY: Record<string, string> = {
   "coche": "car",
   "auto": "car",
   "carro": "car",
-  "autobús": "bus",
+  "autobus": "bus",
   "bicicleta": "bicycle",
   "reloj": "clock",
   "luz": "light",
@@ -50,14 +48,14 @@ const MOCK_DICTIONARY: Record<string, string> = {
   "fuego": "fire",
   "tierra": "earth",
   "aire": "air",
-  "árbol": "tree",
+  "arbol": "tree",
   "flor": "flower",
   "perro": "dog",
   "gato": "cat",
-  "pájaro": "bird",
+  "pajaro": "bird",
   "pez": "fish",
   "mar": "sea",
-  "río": "river",
+  "rio": "river",
 
   // Food
   "comida": "food",
@@ -65,7 +63,7 @@ const MOCK_DICTIONARY: Record<string, string> = {
   "leche": "milk",
   "manzana": "apple",
   "naranja": "orange",
-  "plátano": "banana",
+  "platano": "banana",
   "huevo": "egg",
   "queso": "cheese",
   
@@ -74,12 +72,12 @@ const MOCK_DICTIONARY: Record<string, string> = {
   "familia": "family",
   "amor": "love",
   "tiempo": "time",
-  "día": "day",
+  "dia": "day",
   "noche": "night",
   "feliz": "happy",
   "triste": "sad",
   "braille": "braille",
-  "música": "music",
+  "musica": "music",
   "rojo": "red",
   "azul": "blue",
   "verde": "green",
@@ -87,9 +85,18 @@ const MOCK_DICTIONARY: Record<string, string> = {
 };
 
 export const translateWord = async (word: string): Promise<string> => {
-  const cleanWord = word.trim().toLowerCase().replace(/[.,!¡?¿]/g, '');
+  // Aggressive normalization: 
+  // 1. Trim whitespace
+  // 2. Lowercase
+  // 3. Remove accents (NFD decomposition + regex)
+  // 4. Remove all non-alphanumeric characters except ñ
+  const cleanWord = word.trim().toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") 
+    .replace(/[^a-z0-9ñ]/g, "");
 
-  // 1. Check Dictionary First (Instant response for common words)
+  console.log(`Translating: "${word}" -> normalized: "${cleanWord}"`);
+
+  // 1. Check Dictionary First
   if (MOCK_DICTIONARY[cleanWord]) {
     return MOCK_DICTIONARY[cleanWord];
   }
@@ -97,15 +104,14 @@ export const translateWord = async (word: string): Promise<string> => {
   // 2. If not in dictionary, try API
   if (!apiKey) {
     console.warn("API Key missing and word not in dict");
-    // Simulate network delay
     await new Promise(resolve => setTimeout(resolve, 500));
-    // Return a clearer error tag that the UI can detect
-    return `[Sin conexión] ${word}`;
+    // Return specific tag for unavailable
+    return "UNAVAILABLE";
   }
 
   try {
     const ai = getClient();
-    const prompt = `Translate the following Spanish word to English. Return ONLY the English word, nothing else. No punctuation, no explanation. Word: "${word}"`;
+    const prompt = `Translate the following Spanish word to English. Return ONLY the English word, nothing else. No punctuation. Word: "${word}"`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -113,10 +119,10 @@ export const translateWord = async (word: string): Promise<string> => {
     });
 
     const translatedText = response.text?.trim() || "";
+    // Clean up result just in case
     return translatedText.replace(/[.]/g, '');
   } catch (error) {
     console.error("Translation error:", error);
-    // If API fails, return the error tag
-    return `[Error] ${word}`;
+    return "UNAVAILABLE";
   }
 };
