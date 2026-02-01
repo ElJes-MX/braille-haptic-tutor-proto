@@ -109,8 +109,13 @@ const App: React.FC = () => {
       setTranslatedWord(translation);
       setIsTranslating(false);
       
-      // Speak with correct intonation for English result
-      speakMixed("Traducción lista. En inglés:", translation, 'en-US');
+      // Check for failure tag (starts with bracket like [Mock] or [Error])
+      if (translation.startsWith('[')) {
+          speak("No se pudo traducir la palabra, pero aquí la muestro.", 'es-ES');
+      } else {
+          // Speak with correct intonation for English result
+          speakMixed("Traducción lista. En inglés:", translation, 'en-US');
+      }
       
     } catch (err) {
       setError("No se pudo conectar con el servicio de traducción.");
@@ -127,8 +132,13 @@ const App: React.FC = () => {
     const targetLang = newMode === 'spanish' ? 'es-ES' : 'en-US';
     
     if (textToRead) {
-      const intro = `Cambiando a ${newMode === 'spanish' ? 'Español' : 'Inglés'}`;
-      speakMixed(intro, textToRead, targetLang);
+        // If text is a failure message (starts with [), speak explanation in Spanish
+        if (textToRead.startsWith('[')) {
+             speak(`Modo ${newMode === 'spanish' ? 'Español' : 'Inglés'}. La traducción no está disponible.`, 'es-ES');
+        } else {
+             const intro = `Cambiando a ${newMode === 'spanish' ? 'Español' : 'Inglés'}`;
+             speakMixed(intro, textToRead, targetLang);
+        }
     } else {
       speak(`Cambiando a ${newMode === 'spanish' ? 'Español' : 'Inglés'}.`, 'es-ES');
     }
@@ -203,7 +213,13 @@ const App: React.FC = () => {
                         {activeText}
                     </h2>
                     <button 
-                        onClick={() => speak(activeText, displayMode === 'spanish' ? 'es-ES' : 'en-US')}
+                        onClick={() => {
+                            if (activeText.startsWith('[')) {
+                                speak("Texto no disponible.", 'es-ES');
+                            } else {
+                                speak(activeText, displayMode === 'spanish' ? 'es-ES' : 'en-US');
+                            }
+                        }}
                         className="p-3 bg-gray-700 rounded-full hover:bg-gray-600 focus:ring-2 focus:ring-yellow-400"
                         aria-label={`Escuchar palabra en ${displayMode}`}
                     >
