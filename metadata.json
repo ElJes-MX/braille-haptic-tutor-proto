@@ -1,0 +1,7 @@
+{
+  "name": "BrailleHaptic Tutor",
+  "description": "Una aplicación accesible para adolescentes ciegos que traduce voz a Braille con retroalimentación háptica y auditiva, facilitando el aprendizaje de Braille en español e inglés.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
