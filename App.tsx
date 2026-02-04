@@ -21,6 +21,9 @@ const App: React.FC = () => {
   const recordButtonRef = useRef<HTMLButtonElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const lastTouchedDotRef = useRef<string | null>(null);
+  
+  // Ref to lock scroll event listener during button navigation
+  const isProgrammaticScroll = useRef<boolean>(false);
 
   // Helper to convert string to Braille objects
   const getBrailleData = (text: string) => {
@@ -156,7 +159,7 @@ const App: React.FC = () => {
 
   // --- NAVIGATION & SCROLL LOGIC ---
 
-  // Function to programmatically scroll to a specific letter index
+  // Calculates the scroll position for a specific index and moves the container
   const scrollToIndex = (index: number) => {
     if (!scrollContainerRef.current) return;
     const container = scrollContainerRef.current;
@@ -166,32 +169,70 @@ const App: React.FC = () => {
     if (!innerFlex) return;
     
     // Structure: [Spacer, Cell0, Cell1, ..., Spacer]
-    // Index 0 in logic maps to Child 1 in DOM (Child 0 is Spacer)
+    // Index 0 matches Child 1 because Child 0 is the spacer
     const targetCell = innerFlex.children[index + 1] as HTMLElement;
     
     if (targetCell) {
-        // Calculate: Position of cell relative to parent - Half viewport + Half cell
+        // Center the cell: (Cell Left + Half Width) - (Container Half Width)
         const scrollAmount = targetCell.offsetLeft + (targetCell.offsetWidth / 2) - (container.clientWidth / 2);
         
         container.scrollTo({ left: scrollAmount, behavior: 'smooth' });
     }
   };
 
+  // Logic to move to a specific index (used by buttons)
+  const navigateToIndex = (newIndex: number) => {
+    if (newIndex < 0 || newIndex >= brailleData.length) return;
+
+    // 1. Lock the scroll listener to prevent it from resetting state during animation
+    isProgrammaticScroll.current = true;
+
+    // 2. Update state immediately so UI updates (buttons, active styling)
+    setActiveIndex(newIndex);
+
+    // 3. Perform the physical scroll
+    scrollToIndex(newIndex);
+
+    // 4. Trigger feedback (Audio/Haptic) manually since onScroll is locked
+    const char = brailleData[newIndex]?.char;
+    if (char) {
+        const lang = displayMode === 'spanish' ? 'es-ES' : 'en-US';
+        speak(char.toUpperCase(), lang, 1.0);
+        if (navigator.vibrate) navigator.vibrate(20);
+    }
+
+    // 5. Release the lock after the smooth scroll animation completes (approx 600ms)
+    setTimeout(() => {
+        isProgrammaticScroll.current = false;
+    }, 600);
+  };
+
+  const handleNext = () => {
+    // Calculate new index based on current state
+    const newIndex = activeIndex + 1;
+    navigateToIndex(newIndex);
+  };
+
+  const handlePrev = () => {
+    // Calculate new index based on current state
+    const newIndex = activeIndex - 1;
+    navigateToIndex(newIndex);
+  };
+
   // Handle scroll events (User Swipe)
   const handleScroll = () => {
-    if (!scrollContainerRef.current) return;
+    // If we are scrolling via buttons, ignore scroll events to prevent conflict/jitters
+    if (isProgrammaticScroll.current || !scrollContainerRef.current) return;
     
     const container = scrollContainerRef.current;
     const containerRect = container.getBoundingClientRect();
     const containerCenter = containerRect.left + (containerRect.width / 2);
     
-    // Check inner children
     const cells = Array.from(container.children[0].children) as HTMLElement[]; 
     let closestCell: HTMLElement | null = null;
     let minDistance = Infinity;
 
     for (const cell of cells) {
-      // Look for braille cells only
       if (!cell.hasAttribute('data-char-index')) continue;
 
       const cellRect = cell.getBoundingClientRect();
@@ -204,33 +245,21 @@ const App: React.FC = () => {
       }
     }
 
-    // Threshold to consider a cell "active" (e.g. within 60px of center)
+    // Determine if a new cell is centered
     if (closestCell && minDistance < 60) { 
        const newIndex = parseInt((closestCell as HTMLElement).getAttribute('data-char-index') || '-1');
        
        if (newIndex !== -1 && newIndex !== activeIndex) {
           setActiveIndex(newIndex);
           
+          // Trigger feedback for manual swipe
           const char = (closestCell as HTMLElement).getAttribute('data-braille-char');
           if (char) {
-             // Speak letter in CURRENT language only
              const lang = displayMode === 'spanish' ? 'es-ES' : 'en-US';
              speak(char.toUpperCase(), lang, 1.0);
              if (navigator.vibrate) navigator.vibrate(20);
           }
        }
-    }
-  };
-
-  const handleNext = () => {
-    if (activeIndex < brailleData.length - 1) {
-        scrollToIndex(activeIndex + 1);
-    }
-  };
-
-  const handlePrev = () => {
-    if (activeIndex > 0) {
-        scrollToIndex(activeIndex - 1);
     }
   };
 
@@ -281,8 +310,9 @@ const App: React.FC = () => {
     }
     
     if (activeText && activeText.length > 0) {
+        // Reset to first letter immediately
         setActiveIndex(0);
-        // Small timeout to ensure DOM is ready before initial scroll (if needed)
+        // Ensure scroll matches state
         setTimeout(() => scrollToIndex(0), 50);
     } else {
         setActiveIndex(-1);

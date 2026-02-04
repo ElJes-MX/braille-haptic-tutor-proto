@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 
 // Initialize client using process.env.API_KEY as required by guidelines
-const getClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
+const getClient = () => new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
 
 // Dictionary keys must be normalized (lowercase, no accents, no punctuation)
 const MOCK_DICTIONARY: Record<string, string> = {
