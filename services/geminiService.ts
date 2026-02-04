@@ -14,6 +14,8 @@ const MOCK_DICTIONARY: Record<string, string> = {
   "por favor": "please",
   "si": "yes",
   "no": "no",
+  "buenos dias": "good morning",
+  "buenas noches": "good night",
   
   // Objects & Technology
   "computadora": "computer",
@@ -39,6 +41,9 @@ const MOCK_DICTIONARY: Record<string, string> = {
   "luz": "light",
   "ventana": "window",
   "puerta": "door",
+  "camisa": "shirt",
+  "zapato": "shoe",
+  "pantalon": "pants",
 
   // Nature
   "sol": "sun",
@@ -56,6 +61,8 @@ const MOCK_DICTIONARY: Record<string, string> = {
   "pez": "fish",
   "mar": "sea",
   "rio": "river",
+  "lluvia": "rain",
+  "nube": "cloud",
 
   // Food
   "comida": "food",
@@ -66,6 +73,9 @@ const MOCK_DICTIONARY: Record<string, string> = {
   "platano": "banana",
   "huevo": "egg",
   "queso": "cheese",
+  "carne": "meat",
+  "pollo": "chicken",
+  "arroz": "rice",
   
   // Abstract/Other
   "amigo": "friend",
@@ -81,22 +91,20 @@ const MOCK_DICTIONARY: Record<string, string> = {
   "rojo": "red",
   "azul": "blue",
   "verde": "green",
-  "amarillo": "yellow"
+  "amarillo": "yellow",
+  "blanco": "white",
+  "negro": "black"
 };
 
 export const translateWord = async (word: string): Promise<string> => {
-  // Aggressive normalization: 
-  // 1. Trim whitespace
-  // 2. Lowercase
-  // 3. Remove accents (NFD decomposition + regex)
-  // 4. Remove all non-alphanumeric characters except ñ
+  // Aggressive normalization
   const cleanWord = word.trim().toLowerCase()
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "") 
-    .replace(/[^a-z0-9ñ]/g, "");
+    .replace(/[^a-z0-9ñ\s]/g, ""); // Keep spaces for phrases like "buenos dias"
 
   console.log(`Translating: "${word}" -> normalized: "${cleanWord}"`);
 
-  // 1. Check Dictionary First
+  // 1. Check Dictionary First (Instant fallback)
   if (MOCK_DICTIONARY[cleanWord]) {
     return MOCK_DICTIONARY[cleanWord];
   }
@@ -104,8 +112,8 @@ export const translateWord = async (word: string): Promise<string> => {
   // 2. If not in dictionary, try API
   if (!apiKey) {
     console.warn("API Key missing and word not in dict");
-    await new Promise(resolve => setTimeout(resolve, 500));
-    // Return specific tag for unavailable
+    // Simulate delay to prevent UI flicker
+    await new Promise(resolve => setTimeout(resolve, 300));
     return "UNAVAILABLE";
   }
 
@@ -119,7 +127,9 @@ export const translateWord = async (word: string): Promise<string> => {
     });
 
     const translatedText = response.text?.trim() || "";
-    // Clean up result just in case
+    // If empty response, return UNAVAILABLE
+    if (!translatedText) return "UNAVAILABLE";
+
     return translatedText.replace(/[.]/g, '');
   } catch (error) {
     console.error("Translation error:", error);

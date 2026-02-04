@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { IWindow, BrailleMap } from './types';
+import { IWindow } from './types';
 import { BRAILLE_MAP } from './constants';
 import { translateWord } from './services/geminiService';
 import BrailleCell from './components/BrailleCell';
@@ -19,8 +19,6 @@ const App: React.FC = () => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const lastTouchedDotRef = useRef<string | null>(null);
   const lastReadCharIndexRef = useRef<number | null>(null);
-  const isScrollingRef = useRef<boolean>(false);
-  const scrollTimeoutRef = useRef<number | null>(null);
 
   // Helper to convert string to Braille objects
   const getBrailleData = (text: string) => {
@@ -36,6 +34,7 @@ const App: React.FC = () => {
 
   const speak = (text: string, lang = 'es-ES', rate = 1.0) => {
     if (!window.speechSynthesis) return;
+    // CRITICAL: Cancel previous speech immediately for snappy scrolling
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = lang;
@@ -111,25 +110,27 @@ const App: React.FC = () => {
       const translation = await translateWord(word);
       
       if (translation === "UNAVAILABLE") {
-        setTranslatedWord(word); 
+        setTranslatedWord(word); // Fallback to original
         speak("Traducción no disponible.", 'es-ES');
         setDisplayMode('spanish');
-        setIsTranslating(false); // FIX: Ensure loading state is cleared
       } else {
         setTranslatedWord(translation);
-        setIsTranslating(false);
         speakMixed("En inglés:", translation, 'en-US');
       }
-      
     } catch (err) {
+      console.error(err);
       setError("Error de conexión.");
-      setIsTranslating(false); // FIX: Ensure loading state is cleared on error
+      setTranslatedWord(word); // Fallback to original
+    } finally {
+      // THIS MUST RUN to stop the spinner
+      setIsTranslating(false);
     }
   };
 
   const toggleLanguage = () => {
     const newMode = displayMode === 'spanish' ? 'english' : 'spanish';
     
+    // Allow toggling even if translation failed (just shows unavailable text)
     if (newMode === 'english' && (!translatedWord || translatedWord === "UNAVAILABLE")) {
         speak("No disponible.", 'es-ES');
         return;
@@ -151,46 +152,43 @@ const App: React.FC = () => {
     speak(newState ? "Sonido de puntos activado" : "Sonido de puntos desactivado");
   };
 
-  // --- SCROLL READING LOGIC ---
+  // --- SCROLL READING LOGIC (Optimized) ---
   const handleScroll = () => {
     if (!scrollContainerRef.current) return;
     
-    // Mark as scrolling to disable dot interaction temporarily
-    isScrollingRef.current = true;
-    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
-    scrollTimeoutRef.current = window.setTimeout(() => {
-        isScrollingRef.current = false;
-    }, 150);
-
     const container = scrollContainerRef.current;
-    const containerCenter = container.getBoundingClientRect().left + container.offsetWidth / 2;
+    // Calculate the exact center point relative to the viewport/document
+    // But since we are inside a container, we use offsetWidth/2 + scrollLeft
+    const containerCenter = container.scrollLeft + (container.offsetWidth / 2);
     
     const cells = Array.from(container.children) as HTMLElement[];
     let closestCell: HTMLElement | null = null;
     let minDistance = Infinity;
 
-    // Find the cell closest to the center
-    cells.forEach(cell => {
-      if (!cell.hasAttribute('data-char-index')) return;
+    // Iterate children to find the one closest to center
+    // We assume the first child is the "padding" div if added, or we use offsetLeft
+    for (const cell of cells) {
+      if (!cell.hasAttribute('data-char-index')) continue;
 
-      const rect = cell.getBoundingClientRect();
-      const cellCenter = rect.left + rect.width / 2;
+      // cell.offsetLeft is relative to the scrolling container's left edge
+      const cellCenter = cell.offsetLeft + (cell.offsetWidth / 2);
       const distance = Math.abs(containerCenter - cellCenter);
       
       if (distance < minDistance) {
         minDistance = distance;
         closestCell = cell;
       }
-    });
+    }
 
-    // If we have a central cell
-    if (closestCell && minDistance < 100) { // Tolerance
+    // Trigger read if within a tight threshold (e.g. 100px) and changed
+    if (closestCell && minDistance < 100) { 
        const index = parseInt((closestCell as HTMLElement).getAttribute('data-char-index') || '-1');
        const char = (closestCell as HTMLElement).getAttribute('data-braille-char');
        
        if (index !== -1 && index !== lastReadCharIndexRef.current) {
           lastReadCharIndexRef.current = index;
           if (char) {
+             // Speak immediately
              speak(char.toUpperCase(), displayMode === 'spanish' ? 'es-ES' : 'en-US', 1.2);
              if (navigator.vibrate) navigator.vibrate(20);
           }
@@ -200,11 +198,7 @@ const App: React.FC = () => {
 
   // --- TOUCH DOT INTERACTION ---
   const handleBrailleTouch = (e: React.TouchEvent) => {
-    // If scrolling rapidly, ignore dot exploration to avoid noise
-    // But allow it if the user is deliberately touching/holding
-    // We check this with a simple heuristic, but since we rely on 'touchMove', 
-    // real scrolling is handled by browser. We just need to check if we are hitting a dot.
-    
+    // Basic touch detection for dots
     const touch = e.touches[0];
     const target = document.elementFromPoint(touch.clientX, touch.clientY);
 
@@ -228,9 +222,8 @@ const App: React.FC = () => {
                 navigator.vibrate(isActive ? 50 : 10);
             }
 
-            // Audio (Only if active and enabled)
+            // Audio for dots
             if (audioFeedbackEnabled && isActive) {
-                // Use a very short utterance for dots to avoid overlapping with letter names
                 const u = new SpeechSynthesisUtterance(`${dotIndex + 1}`);
                 u.lang = 'es-ES';
                 u.rate = 2.5; 
@@ -273,7 +266,7 @@ const App: React.FC = () => {
             </button>
 
             <button 
-                onClick={() => speak("Desliza horizontalmente la parte inferior para leer las letras. Toca los puntos para explorarlos.")}
+                onClick={() => speak("Usa la barra amarilla inferior. Desliza las letras hacia la barra para escucharlas.")}
                 className="p-2 border border-white rounded-full hover:bg-gray-800"
                 aria-label="Ayuda"
             >
@@ -340,17 +333,21 @@ const App: React.FC = () => {
         </div>
       </section>
 
-      {/* 3. Braille Area - Scroll Reader */}
+      {/* 3. Braille Area - Scroll Reader with Central Bar */}
       <section 
         className="flex-grow flex flex-col bg-gray-900 border-t-4 border-gray-800 shadow-inner relative"
         aria-label="Zona de lectura Braille"
       >
         <div className="absolute top-2 left-0 w-full text-center pointer-events-none z-10">
-             <span className="text-xs text-gray-500 uppercase tracking-widest bg-gray-900 px-2 rounded opacity-50">Desliza para leer</span>
+             <span className="text-xs text-gray-400 uppercase tracking-widest bg-gray-900/80 px-2 rounded">
+                Barra de Lectura
+             </span>
         </div>
 
-        {/* Central Focus Indicator / Selection Area */}
-        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-40 h-64 border-4 border-yellow-500/30 rounded-2xl pointer-events-none z-0"></div>
+        {/* --- CENTRAL READING BAR (Visual Indicator) --- */}
+        {/* A bright yellow vertical bar/box indicating where the user should slide the letter */}
+        <div className="absolute left-1/2 top-0 bottom-0 -translate-x-1/2 w-1 bg-yellow-500/50 z-0 pointer-events-none shadow-[0_0_20px_rgba(234,179,8,0.5)]"></div>
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-full border-x-2 border-yellow-500/30 bg-yellow-500/5 pointer-events-none z-0"></div>
 
         <div 
             ref={scrollContainerRef}
@@ -361,23 +358,19 @@ const App: React.FC = () => {
             onTouchMove={handleBrailleTouch}
             onTouchEnd={() => { lastTouchedDotRef.current = null; }}
             
-            // Snap scrolling for discrete letter feel
+            // Snap scrolling
             className="flex-1 overflow-x-auto overflow-y-hidden flex items-center px-[50vw] hide-scrollbar snap-x snap-mandatory"
         >
-             <div className="flex gap-20 items-center min-w-full">
+             <div className="flex gap-24 items-center min-w-full">
                 {currentWord ? (
                     brailleData.map((data, index) => (
-                        <div key={`${displayMode}-${index}`} className="relative">
+                        <div key={`${displayMode}-${index}`} className="relative snap-center">
                             <BrailleCell 
                                 char={data.char} 
                                 dots={data.dots} 
                                 isActiveChar={true}
                                 index={index}
                             />
-                            {/* Visual guide below cell */}
-                            <div className="absolute -bottom-8 left-0 w-full text-center text-gray-600 text-xs">
-                                Letra {index + 1}
-                            </div>
                         </div>
                     ))
                 ) : (
