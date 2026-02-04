@@ -3,7 +3,7 @@ import { IWindow } from './types';
 import { BRAILLE_MAP } from './constants';
 import { translateWord } from './services/geminiService';
 import BrailleCell from './components/BrailleCell';
-import { Mic, Volume2, Globe, Info, Ear, EarOff } from 'lucide-react';
+import { Mic, Volume2, Globe, Info, Ear, EarOff, ChevronLeft, ChevronRight } from 'lucide-react';
 
 const App: React.FC = () => {
   const [currentWord, setCurrentWord] = useState<string>("");
@@ -32,9 +32,11 @@ const App: React.FC = () => {
     });
   };
 
+  const activeText = displayMode === 'spanish' ? currentWord : translatedWord;
+  const brailleData = getBrailleData(activeText || "");
+
   const speak = (text: string, lang = 'es-ES', rate = 1.0) => {
     if (!window.speechSynthesis) return;
-    // CRITICAL: Cancel previous speech immediately for snappy scrolling
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = lang;
@@ -52,6 +54,24 @@ const App: React.FC = () => {
     const u2 = new SpeechSynthesisUtterance(contentText);
     u2.lang = contentLang;
     u2.rate = 0.9; 
+
+    window.speechSynthesis.speak(u1);
+    window.speechSynthesis.speak(u2);
+  };
+
+  const speakLetterDual = (char: string) => {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    
+    // Spanish
+    const u1 = new SpeechSynthesisUtterance(char.toUpperCase());
+    u1.lang = 'es-ES';
+    u1.rate = 1.0;
+    
+    // English
+    const u2 = new SpeechSynthesisUtterance(char.toUpperCase());
+    u2.lang = 'en-US';
+    u2.rate = 1.0;
 
     window.speechSynthesis.speak(u1);
     window.speechSynthesis.speak(u2);
@@ -122,7 +142,6 @@ const App: React.FC = () => {
       setError("Error de conexión.");
       setTranslatedWord(word); // Fallback to original
     } finally {
-      // THIS MUST RUN to stop the spinner
       setIsTranslating(false);
     }
   };
@@ -130,7 +149,6 @@ const App: React.FC = () => {
   const toggleLanguage = () => {
     const newMode = displayMode === 'spanish' ? 'english' : 'spanish';
     
-    // Allow toggling even if translation failed (just shows unavailable text)
     if (newMode === 'english' && (!translatedWord || translatedWord === "UNAVAILABLE")) {
         speak("No disponible.", 'es-ES');
         return;
@@ -152,26 +170,25 @@ const App: React.FC = () => {
     speak(newState ? "Sonido de puntos activado" : "Sonido de puntos desactivado");
   };
 
-  // --- SCROLL READING LOGIC (Optimized) ---
+  // --- SCROLL READING LOGIC ---
   const handleScroll = () => {
     if (!scrollContainerRef.current) return;
     
     const container = scrollContainerRef.current;
-    // Calculate the exact center point relative to the viewport/document
-    // But since we are inside a container, we use offsetWidth/2 + scrollLeft
-    const containerCenter = container.scrollLeft + (container.offsetWidth / 2);
+    const containerRect = container.getBoundingClientRect();
+    const containerCenter = containerRect.left + (containerRect.width / 2);
     
-    const cells = Array.from(container.children) as HTMLElement[];
+    const cells = Array.from(container.children[0].children) as HTMLElement[]; // Access inner flex children
     let closestCell: HTMLElement | null = null;
     let minDistance = Infinity;
 
-    // Iterate children to find the one closest to center
-    // We assume the first child is the "padding" div if added, or we use offsetLeft
+    // Check every child element
     for (const cell of cells) {
+      // Skip spacer divs or non-cell elements
       if (!cell.hasAttribute('data-char-index')) continue;
 
-      // cell.offsetLeft is relative to the scrolling container's left edge
-      const cellCenter = cell.offsetLeft + (cell.offsetWidth / 2);
+      const cellRect = cell.getBoundingClientRect();
+      const cellCenter = cellRect.left + (cellRect.width / 2);
       const distance = Math.abs(containerCenter - cellCenter);
       
       if (distance < minDistance) {
@@ -180,25 +197,60 @@ const App: React.FC = () => {
       }
     }
 
-    // Trigger read if within a tight threshold (e.g. 100px) and changed
-    if (closestCell && minDistance < 100) { 
+    if (closestCell && minDistance < 80) { 
        const index = parseInt((closestCell as HTMLElement).getAttribute('data-char-index') || '-1');
        const char = (closestCell as HTMLElement).getAttribute('data-braille-char');
        
        if (index !== -1 && index !== lastReadCharIndexRef.current) {
           lastReadCharIndexRef.current = index;
           if (char) {
-             // Speak immediately
-             speak(char.toUpperCase(), displayMode === 'spanish' ? 'es-ES' : 'en-US', 1.2);
+             // Speak letter in both languages
+             speakLetterDual(char);
              if (navigator.vibrate) navigator.vibrate(20);
           }
        }
     }
   };
 
+  // --- NAVIGATION LOGIC ---
+  const scrollToLetter = (index: number) => {
+    if (!scrollContainerRef.current) return;
+    const container = scrollContainerRef.current;
+    const innerFlex = container.firstElementChild; // The flex container
+    if (!innerFlex) return;
+    
+    // Structure: [Spacer, Cell0, Cell1, ..., Spacer]
+    // So Index 0 is child 1.
+    const targetCell = innerFlex.children[index + 1] as HTMLElement;
+    
+    if (targetCell) {
+        // Calculate the scroll position needed to center this element
+        // targetCell.offsetLeft is relative to the innerFlex container.
+        // We need to account for the container's width to center it.
+        const scrollLeft = (targetCell.offsetLeft + targetCell.offsetWidth / 2) - (container.clientWidth / 2);
+        
+        container.scrollTo({ left: scrollLeft, behavior: 'smooth' });
+    }
+  };
+
+  const handleNext = () => {
+    const currentIndex = lastReadCharIndexRef.current ?? -1;
+    if (currentIndex < brailleData.length - 1) {
+        scrollToLetter(currentIndex + 1);
+    } else if (currentIndex === -1 && brailleData.length > 0) {
+        scrollToLetter(0);
+    }
+  };
+
+  const handlePrev = () => {
+    const currentIndex = lastReadCharIndexRef.current ?? 0;
+    if (currentIndex > 0) {
+        scrollToLetter(currentIndex - 1);
+    }
+  };
+
   // --- TOUCH DOT INTERACTION ---
   const handleBrailleTouch = (e: React.TouchEvent) => {
-    // Basic touch detection for dots
     const touch = e.touches[0];
     const target = document.elementFromPoint(touch.clientX, touch.clientY);
 
@@ -239,14 +291,10 @@ const App: React.FC = () => {
   useEffect(() => {
     lastReadCharIndexRef.current = null;
     lastTouchedDotRef.current = null;
-    // Scroll to start
     if (scrollContainerRef.current) {
         scrollContainerRef.current.scrollTo({ left: 0, behavior: 'smooth' });
     }
   }, [currentWord, displayMode]);
-
-  const activeText = displayMode === 'spanish' ? currentWord : translatedWord;
-  const brailleData = getBrailleData(activeText || "");
 
   return (
     <main className="flex flex-col h-[100dvh] bg-high-contrast-bg text-high-contrast-text overflow-hidden">
@@ -266,7 +314,7 @@ const App: React.FC = () => {
             </button>
 
             <button 
-                onClick={() => speak("Usa la barra amarilla inferior. Desliza las letras hacia la barra para escucharlas.")}
+                onClick={() => speak("Usa los botones o desliza la barra amarilla inferior para leer cada letra en español e inglés.")}
                 className="p-2 border border-white rounded-full hover:bg-gray-800"
                 aria-label="Ayuda"
             >
@@ -338,14 +386,36 @@ const App: React.FC = () => {
         className="flex-grow flex flex-col bg-gray-900 border-t-4 border-gray-800 shadow-inner relative"
         aria-label="Zona de lectura Braille"
       >
-        <div className="absolute top-2 left-0 w-full text-center pointer-events-none z-10">
-             <span className="text-xs text-gray-400 uppercase tracking-widest bg-gray-900/80 px-2 rounded">
+        {/* Navigation Controls & Label */}
+        <div className="absolute top-2 left-0 w-full flex justify-center items-center gap-6 z-20 pointer-events-none">
+             <button 
+                onClick={handlePrev}
+                disabled={!currentWord}
+                className="pointer-events-auto p-3 bg-gray-800 rounded-full border border-gray-600 text-white active:bg-gray-700 disabled:opacity-30 disabled:border-gray-800 transition-colors shadow-lg"
+                aria-label="Letra anterior"
+             >
+                <ChevronLeft size={24} />
+             </button>
+
+             <span className="text-xs text-gray-400 uppercase tracking-widest bg-gray-900/90 px-3 py-1 rounded shadow-sm">
                 Barra de Lectura
              </span>
+
+             <button 
+                onClick={handleNext}
+                disabled={!currentWord}
+                className="pointer-events-auto p-3 bg-gray-800 rounded-full border border-gray-600 text-white active:bg-gray-700 disabled:opacity-30 disabled:border-gray-800 transition-colors shadow-lg"
+                aria-label="Letra siguiente"
+             >
+                <ChevronRight size={24} />
+             </button>
         </div>
 
         {/* --- CENTRAL READING BAR (Visual Indicator) --- */}
-        {/* A bright yellow vertical bar/box indicating where the user should slide the letter */}
+        {/* Horizontal Track Line */}
+        <div className="absolute top-1/2 left-0 w-full h-1 bg-gray-700/50 -translate-y-1/2 z-0 pointer-events-none"></div>
+        
+        {/* Scanner Vertical Bar */}
         <div className="absolute left-1/2 top-0 bottom-0 -translate-x-1/2 w-1 bg-yellow-500/50 z-0 pointer-events-none shadow-[0_0_20px_rgba(234,179,8,0.5)]"></div>
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-full border-x-2 border-yellow-500/30 bg-yellow-500/5 pointer-events-none z-0"></div>
 
@@ -359,12 +429,15 @@ const App: React.FC = () => {
             onTouchEnd={() => { lastTouchedDotRef.current = null; }}
             
             // Snap scrolling
-            className="flex-1 overflow-x-auto overflow-y-hidden flex items-center px-[50vw] hide-scrollbar snap-x snap-mandatory"
+            className="flex-1 overflow-x-auto overflow-y-hidden flex items-center hide-scrollbar snap-x snap-mandatory"
         >
-             <div className="flex gap-24 items-center min-w-full">
+             <div className="flex items-center">
+                {/* Spacer Start: Half screen width minus half cell width (approx 80px) to center first item */}
+                <div className="shrink-0 w-[calc(50vw-5rem)]"></div>
+
                 {currentWord ? (
                     brailleData.map((data, index) => (
-                        <div key={`${displayMode}-${index}`} className="relative snap-center">
+                        <div key={`${displayMode}-${index}`} className="relative snap-center mx-6">
                             <BrailleCell 
                                 char={data.char} 
                                 dots={data.dots} 
@@ -374,11 +447,14 @@ const App: React.FC = () => {
                         </div>
                     ))
                 ) : (
-                    <div className="w-full text-center opacity-20 snap-center min-w-[200px]">
+                    <div className="w-[200px] text-center opacity-20 snap-center mx-auto">
                         <div className="text-6xl mb-2">⠃⠗⠇</div>
                         <p className="text-sm">Área Táctil</p>
                     </div>
                 )}
+
+                {/* Spacer End: Ensures last item can reach center */}
+                <div className="shrink-0 w-[calc(50vw-5rem)]"></div>
              </div>
         </div>
       </section>

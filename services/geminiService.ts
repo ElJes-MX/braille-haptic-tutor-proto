@@ -1,9 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
-
-// Initialize client only if key exists (handled in component)
-const getClient = () => new GoogleGenAI({ apiKey });
+// Initialize client using process.env.API_KEY as required by guidelines
+const getClient = () => new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 // Dictionary keys must be normalized (lowercase, no accents, no punctuation)
 const MOCK_DICTIONARY: Record<string, string> = {
@@ -110,7 +108,7 @@ export const translateWord = async (word: string): Promise<string> => {
   }
 
   // 2. If not in dictionary, try API
-  if (!apiKey) {
+  if (!process.env.API_KEY) {
     console.warn("API Key missing and word not in dict");
     // Simulate delay to prevent UI flicker
     await new Promise(resolve => setTimeout(resolve, 300));
