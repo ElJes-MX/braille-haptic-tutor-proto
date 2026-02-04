@@ -108,7 +108,7 @@ export const translateWord = async (word: string): Promise<string> => {
   }
 
   // 2. If not in dictionary, try API
-  if (!process.env.API_KEY) {
+  if (!import.meta.env.VITE_GEMINI_API_KEY) {
     console.warn("API Key missing and word not in dict");
     // Simulate delay to prevent UI flicker
     await new Promise(resolve => setTimeout(resolve, 300));
