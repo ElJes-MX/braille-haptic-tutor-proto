@@ -1,6 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
+const apiKey = process.env.API_KEY || '';
 
 // Initialize client only if key exists (handled in component)
 const getClient = () => new GoogleGenAI({ apiKey });
