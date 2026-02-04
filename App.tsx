@@ -14,8 +14,10 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [audioFeedbackEnabled, setAudioFeedbackEnabled] = useState(true);
 
-  // Focus management
+  // Refs for touch tracking
   const recordButtonRef = useRef<HTMLButtonElement>(null);
+  const lastTouchedDotRef = useRef<string | null>(null);
+  const lastReadCharIndexRef = useRef<number | null>(null);
 
   // Helper to convert string to Braille objects
   const getBrailleData = (text: string) => {
@@ -29,11 +31,12 @@ const App: React.FC = () => {
     });
   };
 
-  const speak = (text: string, lang = 'es-ES') => {
+  const speak = (text: string, lang = 'es-ES', rate = 1.0) => {
     if (!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = lang;
+    utterance.rate = rate;
     window.speechSynthesis.speak(utterance);
   };
 
@@ -144,21 +147,86 @@ const App: React.FC = () => {
     speak(newState ? "Sonido de puntos activado" : "Sonido de puntos desactivado");
   };
 
-  // Use current word or translated word based on mode
+  // --- GLOBAL TOUCH HANDLER FOR BRAILLE AREA ---
+  // This allows continuous sliding across letters and dots
+  const handleBrailleTouch = (e: React.TouchEvent) => {
+    // We don't preventDefault globally here because we might want to snap-scroll
+    // However, BrailleCell has touch-action: none which handles the 'locking' inside cells
+    
+    const touch = e.touches[0];
+    const target = document.elementFromPoint(touch.clientX, touch.clientY);
+
+    if (!target) return;
+
+    // 1. DETECT LETTER CHANGE (Read Letter Name)
+    const charContainer = target.closest('[data-char-index]');
+    if (charContainer) {
+        const charIndex = parseInt(charContainer.getAttribute('data-char-index') || "-1");
+        const charName = charContainer.getAttribute('data-braille-char');
+        
+        if (charIndex !== -1 && charIndex !== lastReadCharIndexRef.current) {
+            lastReadCharIndexRef.current = charIndex;
+            // Speak the letter name clearly
+            if (charName) {
+                speak(charName.toUpperCase(), displayMode === 'spanish' ? 'es-ES' : 'en-US', 1.2);
+                if (navigator.vibrate) navigator.vibrate(15); // Tiny tick on letter change
+            }
+        }
+    } else {
+        lastReadCharIndexRef.current = null;
+    }
+
+    // 2. DETECT DOT INTERACTION (Haptics + Audio)
+    const dotElement = target.closest('[data-dot-index]');
+    
+    if (dotElement) {
+        const dotIndexStr = dotElement.getAttribute('data-dot-index');
+        const isActiveStr = dotElement.getAttribute('data-active');
+        const uniqueDotId = `${lastReadCharIndexRef.current}-${dotIndexStr}`;
+
+        if (dotIndexStr && uniqueDotId !== lastTouchedDotRef.current) {
+            const dotIndex = parseInt(dotIndexStr);
+            const isActive = isActiveStr === "true";
+            
+            lastTouchedDotRef.current = uniqueDotId;
+            
+            // Haptics
+            if (navigator.vibrate) {
+                navigator.vibrate(isActive ? 50 : 10);
+            }
+
+            // Audio (if enabled)
+            if (audioFeedbackEnabled && isActive) {
+                const u = new SpeechSynthesisUtterance(`${dotIndex + 1}`);
+                u.lang = 'es-ES';
+                u.rate = 2.0; 
+                window.speechSynthesis.speak(u);
+            }
+        }
+    } else {
+        lastTouchedDotRef.current = null;
+    }
+  };
+
+  // Reset refs when word changes
+  useEffect(() => {
+    lastReadCharIndexRef.current = null;
+    lastTouchedDotRef.current = null;
+  }, [currentWord, displayMode]);
+
+
   const activeText = displayMode === 'spanish' ? currentWord : translatedWord;
   const brailleData = getBrailleData(activeText || "");
 
-  // Layout optimized for mobile: 100dvh prevents scrollbar issues on mobile browsers
   return (
     <main className="flex flex-col h-[100dvh] bg-high-contrast-bg text-high-contrast-text overflow-hidden">
       
-      {/* 1. Header Area (Approx 10% height) */}
+      {/* 1. Header Area */}
       <header className="flex justify-between items-center px-4 py-2 border-b border-gray-800 shrink-0 h-16">
         <h1 className="text-xl font-bold tracking-wider truncate" aria-label="Tutor Braille">
           Braille<span className="text-braille-active">Tutor</span>
         </h1>
         <div className="flex gap-3">
-            {/* Audio Toggle */}
             <button
                 onClick={toggleAudioFeedback}
                 className={`p-2 rounded-full border ${audioFeedbackEnabled ? 'bg-gray-800 border-yellow-500 text-yellow-500' : 'bg-gray-800 border-gray-600 text-gray-500'}`}
@@ -167,9 +235,8 @@ const App: React.FC = () => {
                 {audioFeedbackEnabled ? <Ear size={20} /> : <EarOff size={20} />}
             </button>
 
-            {/* Instructions */}
             <button 
-                onClick={() => speak("Presiona el micrófono en el centro. La parte inferior es tu tablero Braille. Desliza para leer.")}
+                onClick={() => speak("Desliza el dedo por la parte inferior. Si tocas una letra, te la diré. Si tocas un punto, vibrará.")}
                 className="p-2 border border-white rounded-full hover:bg-gray-800"
                 aria-label="Ayuda"
             >
@@ -178,10 +245,8 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      {/* 2. Word Display & Primary Actions (Approx 35% height) */}
+      {/* 2. Word Display & Actions */}
       <section className="flex flex-col items-center justify-center p-4 gap-4 shrink-0 bg-gray-900/50">
-        
-        {/* The Word */}
         <div className="flex items-center justify-center gap-3 w-full">
             <h2 className="text-4xl font-bold text-white uppercase tracking-widest truncate max-w-[70%] text-center">
                 {activeText || "---"}
@@ -196,9 +261,7 @@ const App: React.FC = () => {
             )}
         </div>
 
-        {/* Controls Row */}
         <div className="flex items-center gap-6 mt-2">
-            {/* Language Toggle */}
             <button
                 onClick={toggleLanguage}
                 disabled={!currentWord}
@@ -215,7 +278,6 @@ const App: React.FC = () => {
                 <span className="text-[10px] font-bold mt-1">{displayMode === 'english' ? "EN" : "ES"}</span>
             </button>
 
-            {/* Main Mic Button - Central & Large */}
             <button
                 ref={recordButtonRef}
                 onClick={handleListening}
@@ -234,7 +296,6 @@ const App: React.FC = () => {
             </button>
         </div>
 
-        {/* Feedback Text */}
         <div className="h-6 text-center">
             {isListening && <span className="text-yellow-400 text-sm animate-pulse">Te escucho...</span>}
             {isTranslating && <span className="text-blue-400 text-sm animate-pulse">Traduciendo...</span>}
@@ -242,19 +303,24 @@ const App: React.FC = () => {
         </div>
       </section>
 
-      {/* 3. Braille Area (Flexible, takes remaining space, approx 55%) */}
-      {/* Dedicated area that mimics a physical board. Always present. */}
+      {/* 3. Braille Area with Snap Scrolling & Global Touch Tracking */}
       <section 
         className="flex-grow flex flex-col bg-gray-900 border-t-4 border-gray-800 shadow-inner overflow-hidden relative"
         aria-label="Zona de lectura Braille"
       >
-        <div className="absolute top-2 left-0 w-full text-center pointer-events-none">
-             <span className="text-xs text-gray-500 uppercase tracking-widest">Tablero Braille</span>
+        <div className="absolute top-2 left-0 w-full text-center pointer-events-none z-10">
+             <span className="text-xs text-gray-500 uppercase tracking-widest bg-gray-900 px-2 rounded">Tablero Braille</span>
         </div>
 
-        {/* Scrollable Container */}
-        <div className="flex-1 overflow-x-auto overflow-y-hidden flex items-center px-6 hide-scrollbar touch-pan-x">
-             <div className="flex gap-4 items-center min-w-full">
+        <div 
+            // Unified touch handler on the container
+            onTouchStart={handleBrailleTouch}
+            onTouchMove={handleBrailleTouch}
+            onTouchEnd={() => { lastReadCharIndexRef.current = null; lastTouchedDotRef.current = null; }}
+            // snap-x snap-mandatory: Forces the view to snap to letters, stabilizing the board
+            className="flex-1 overflow-x-auto overflow-y-hidden flex items-center px-[35vw] hide-scrollbar snap-x snap-mandatory"
+        >
+             <div className="flex gap-12 items-center min-w-full pl-4 pr-4">
                 {currentWord ? (
                     brailleData.map((data, index) => (
                         <BrailleCell 
@@ -262,18 +328,15 @@ const App: React.FC = () => {
                             char={data.char} 
                             dots={data.dots} 
                             isActiveChar={true}
-                            audioEnabled={audioFeedbackEnabled}
+                            index={index}
                         />
                     ))
                 ) : (
-                    // Placeholder state suggesting interaction
-                    <div className="w-full text-center opacity-20">
+                    <div className="w-full text-center opacity-20 snap-center">
                         <div className="text-6xl mb-2">⠃⠗⠇</div>
                         <p className="text-sm">Área Táctil</p>
                     </div>
                 )}
-                {/* Spacer to allow scrolling the last item into clear view */}
-                <div className="w-8 shrink-0"></div>
              </div>
         </div>
       </section>

@@ -1,117 +1,56 @@
-import React, { useCallback, useRef } from 'react';
+import React from 'react';
 import { DOT_LABELS } from '../constants';
 
 interface BrailleCellProps {
   char: string;
   dots: boolean[];
   isActiveChar: boolean;
-  audioEnabled: boolean; // New prop to toggle voice feedback
+  index: number; // Added index to identify the cell in the parent
 }
 
-const BrailleCell: React.FC<BrailleCellProps> = ({ char, dots, isActiveChar, audioEnabled }) => {
-  // Refs to track the state of the drag gesture without triggering re-renders
-  const lastTouchedElementRef = useRef<HTMLElement | null>(null);
-
-  const triggerFeedback = useCallback((index: number, isActive: boolean) => {
-    // 1. Advanced Haptic Feedback (ALWAYS ACTIVE)
-    if (navigator.vibrate) {
-      if (isActive) {
-        // Active Dot: Sharp, strong "bump" simulation
-        navigator.vibrate(50);
-      } else {
-        // Inactive Dot: Very short "tick" or "texture" simulation
-        navigator.vibrate(10);
-      }
-    }
-
-    // 2. Audio Cue (CONDITIONAL)
-    if (window.speechSynthesis && audioEnabled) {
-        // Cancel any pending speech to ensure immediate feedback for the current dot
-        window.speechSynthesis.cancel();
-        
-        const utterance = new SpeechSynthesisUtterance();
-        utterance.lang = 'es-ES';
-        utterance.rate = 2.0; // Fast rate for scanning/scrubbing
-        
-        // Short, concise audio for rapid exploration
-        if (isActive) {
-             utterance.text = `${index + 1}`; 
-        } else {
-             // Silence for empty dots to reduce noise, rely on vibration
-        }
-
-        if (isActive) {
-            window.speechSynthesis.speak(utterance);
-        }
-    }
-  }, [audioEnabled]);
-
-  // Universal handler for processing a specific dot element
-  const processDotInteraction = (element: HTMLElement) => {
-    // Prevent re-triggering on the exact same element continuously during a slight finger roll
-    if (lastTouchedElementRef.current === element) return;
-
-    const indexStr = element.getAttribute('data-dot-index');
-    if (indexStr !== null) {
-      const index = parseInt(indexStr, 10);
-      const isActive = dots[index];
-      
-      lastTouchedElementRef.current = element;
-      triggerFeedback(index, isActive);
-    }
-  };
-
-  // Handle Touch Move (Scrubbing behavior)
-  const handleTouchMove = (e: React.TouchEvent) => {
-    const touch = e.touches[0];
-    const element = document.elementFromPoint(touch.clientX, touch.clientY) as HTMLElement;
-
-    if (element && element.hasAttribute('data-dot-index')) {
-      processDotInteraction(element);
-    } else {
-      lastTouchedElementRef.current = null;
-    }
-  };
-
-  const handleMouseEnter = (index: number) => {
-    triggerFeedback(index, dots[index]);
-  };
+const BrailleCell: React.FC<BrailleCellProps> = ({ char, dots, isActiveChar, index }) => {
+  // Note: Touch logic is now handled by the parent container in App.tsx 
+  // using document.elementFromPoint to allow continuous sliding between letters.
 
   return (
     <div 
+      // data attributes allow the parent touch handler to identify what is being touched
+      data-braille-char={char}
+      data-char-index={index}
       className={`
-        flex flex-col items-center justify-center p-2 mx-1 my-2 rounded-xl border-2 select-none shrink-0
+        snap-center shrink-0 flex flex-col items-center justify-center 
+        p-2 mx-1 my-2 rounded-xl border-2 select-none 
         transition-colors duration-300
         ${isActiveChar ? 'border-high-contrast-text bg-gray-900' : 'border-gray-700 bg-gray-800 opacity-50'}
       `}
+      // touch-action: none is CRITICAL. It tells the browser "Don't scroll when I drag inside this box".
+      // This fixes the "letters not fixed" issue by locking scroll while exploring dots.
+      style={{ minWidth: '140px', touchAction: 'none' }} 
       aria-label={`Carácter Braille para la letra ${char}`}
-      onTouchMove={handleTouchMove}
-      onTouchStart={handleTouchMove}
-      onTouchEnd={() => { lastTouchedElementRef.current = null; }}
-      style={{ minWidth: '120px' }} // Ensure cell is wide enough on mobile
     >
-      <div className="text-4xl font-bold mb-2 text-white uppercase font-sans pointer-events-none">{char}</div>
+      <div className="text-5xl font-bold mb-4 text-white uppercase font-sans pointer-events-none">{char}</div>
       
-      {/* Grid for dots: 2 columns, 3 rows - Optimized for touch size */}
-      <div className="grid grid-cols-2 gap-x-6 gap-y-4 w-full px-2 justify-items-center">
-        {dots.map((isActive, index) => (
+      {/* Grid for dots: 2 columns, 3 rows */}
+      <div className="grid grid-cols-2 gap-x-8 gap-y-6 w-full px-2 justify-items-center pointer-events-none">
+        {dots.map((isActive, dotIndex) => (
           <div
-            key={index}
-            data-dot-index={index}
-            data-active={isActive}
+            key={dotIndex}
+            // Markers for the global touch handler to detect dots
+            data-dot-index={dotIndex}
+            data-active={isActive ? "true" : "false"}
+            // Actual visual dot
             className={`
-              w-12 h-12 rounded-full border-2 
-              flex items-center justify-center transition-all duration-100
+              w-10 h-10 rounded-full border-2 
+              flex items-center justify-center transition-all duration-100 pointer-events-auto
               ${isActive 
                 ? 'bg-braille-active border-braille-active shadow-[0_0_15px_rgba(56,189,248,0.6)]' 
                 : 'bg-transparent border-braille-inactive'
               }
             `}
-            onMouseEnter={() => handleMouseEnter(index)}
             role="img"
-            aria-label={DOT_LABELS[index] + (isActive ? " (Relieve)" : " (Plano)")}
+            aria-label={DOT_LABELS[dotIndex]}
           >
-             <span className="sr-only pointer-events-none">{isActive ? "Punto" : "Vacío"}</span>
+             <span className="sr-only">{isActive ? "Punto" : "Vacío"}</span>
           </div>
         ))}
       </div>
