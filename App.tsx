@@ -13,12 +13,14 @@ const App: React.FC = () => {
   const [displayMode, setDisplayMode] = useState<'spanish' | 'english'>('spanish');
   const [error, setError] = useState<string | null>(null);
   const [audioFeedbackEnabled, setAudioFeedbackEnabled] = useState(true);
+  
+  // State for the currently centered letter index (-1 if no word)
+  const [activeIndex, setActiveIndex] = useState<number>(-1);
 
   // Refs for interactions
   const recordButtonRef = useRef<HTMLButtonElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const lastTouchedDotRef = useRef<string | null>(null);
-  const lastReadCharIndexRef = useRef<number | null>(null);
 
   // Helper to convert string to Braille objects
   const getBrailleData = (text: string) => {
@@ -54,24 +56,6 @@ const App: React.FC = () => {
     const u2 = new SpeechSynthesisUtterance(contentText);
     u2.lang = contentLang;
     u2.rate = 0.9; 
-
-    window.speechSynthesis.speak(u1);
-    window.speechSynthesis.speak(u2);
-  };
-
-  const speakLetterDual = (char: string) => {
-    if (!window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    
-    // Spanish
-    const u1 = new SpeechSynthesisUtterance(char.toUpperCase());
-    u1.lang = 'es-ES';
-    u1.rate = 1.0;
-    
-    // English
-    const u2 = new SpeechSynthesisUtterance(char.toUpperCase());
-    u2.lang = 'en-US';
-    u2.rate = 1.0;
 
     window.speechSynthesis.speak(u1);
     window.speechSynthesis.speak(u2);
@@ -170,7 +154,30 @@ const App: React.FC = () => {
     speak(newState ? "Sonido de puntos activado" : "Sonido de puntos desactivado");
   };
 
-  // --- SCROLL READING LOGIC ---
+  // --- NAVIGATION & SCROLL LOGIC ---
+
+  // Function to programmatically scroll to a specific letter index
+  const scrollToIndex = (index: number) => {
+    if (!scrollContainerRef.current) return;
+    const container = scrollContainerRef.current;
+    
+    // The inner flex container (first child) holds the cells
+    const innerFlex = container.firstElementChild; 
+    if (!innerFlex) return;
+    
+    // Structure: [Spacer, Cell0, Cell1, ..., Spacer]
+    // Index 0 in logic maps to Child 1 in DOM (Child 0 is Spacer)
+    const targetCell = innerFlex.children[index + 1] as HTMLElement;
+    
+    if (targetCell) {
+        // Calculate: Position of cell relative to parent - Half viewport + Half cell
+        const scrollAmount = targetCell.offsetLeft + (targetCell.offsetWidth / 2) - (container.clientWidth / 2);
+        
+        container.scrollTo({ left: scrollAmount, behavior: 'smooth' });
+    }
+  };
+
+  // Handle scroll events (User Swipe)
   const handleScroll = () => {
     if (!scrollContainerRef.current) return;
     
@@ -178,13 +185,13 @@ const App: React.FC = () => {
     const containerRect = container.getBoundingClientRect();
     const containerCenter = containerRect.left + (containerRect.width / 2);
     
-    const cells = Array.from(container.children[0].children) as HTMLElement[]; // Access inner flex children
+    // Check inner children
+    const cells = Array.from(container.children[0].children) as HTMLElement[]; 
     let closestCell: HTMLElement | null = null;
     let minDistance = Infinity;
 
-    // Check every child element
     for (const cell of cells) {
-      // Skip spacer divs or non-cell elements
+      // Look for braille cells only
       if (!cell.hasAttribute('data-char-index')) continue;
 
       const cellRect = cell.getBoundingClientRect();
@@ -197,55 +204,33 @@ const App: React.FC = () => {
       }
     }
 
-    if (closestCell && minDistance < 80) { 
-       const index = parseInt((closestCell as HTMLElement).getAttribute('data-char-index') || '-1');
-       const char = (closestCell as HTMLElement).getAttribute('data-braille-char');
+    // Threshold to consider a cell "active" (e.g. within 60px of center)
+    if (closestCell && minDistance < 60) { 
+       const newIndex = parseInt((closestCell as HTMLElement).getAttribute('data-char-index') || '-1');
        
-       if (index !== -1 && index !== lastReadCharIndexRef.current) {
-          lastReadCharIndexRef.current = index;
+       if (newIndex !== -1 && newIndex !== activeIndex) {
+          setActiveIndex(newIndex);
+          
+          const char = (closestCell as HTMLElement).getAttribute('data-braille-char');
           if (char) {
-             // Speak letter in both languages
-             speakLetterDual(char);
+             // Speak letter in CURRENT language only
+             const lang = displayMode === 'spanish' ? 'es-ES' : 'en-US';
+             speak(char.toUpperCase(), lang, 1.0);
              if (navigator.vibrate) navigator.vibrate(20);
           }
        }
     }
   };
 
-  // --- NAVIGATION LOGIC ---
-  const scrollToLetter = (index: number) => {
-    if (!scrollContainerRef.current) return;
-    const container = scrollContainerRef.current;
-    const innerFlex = container.firstElementChild; // The flex container
-    if (!innerFlex) return;
-    
-    // Structure: [Spacer, Cell0, Cell1, ..., Spacer]
-    // So Index 0 is child 1.
-    const targetCell = innerFlex.children[index + 1] as HTMLElement;
-    
-    if (targetCell) {
-        // Calculate the scroll position needed to center this element
-        // targetCell.offsetLeft is relative to the innerFlex container.
-        // We need to account for the container's width to center it.
-        const scrollLeft = (targetCell.offsetLeft + targetCell.offsetWidth / 2) - (container.clientWidth / 2);
-        
-        container.scrollTo({ left: scrollLeft, behavior: 'smooth' });
-    }
-  };
-
   const handleNext = () => {
-    const currentIndex = lastReadCharIndexRef.current ?? -1;
-    if (currentIndex < brailleData.length - 1) {
-        scrollToLetter(currentIndex + 1);
-    } else if (currentIndex === -1 && brailleData.length > 0) {
-        scrollToLetter(0);
+    if (activeIndex < brailleData.length - 1) {
+        scrollToIndex(activeIndex + 1);
     }
   };
 
   const handlePrev = () => {
-    const currentIndex = lastReadCharIndexRef.current ?? 0;
-    if (currentIndex > 0) {
-        scrollToLetter(currentIndex - 1);
+    if (activeIndex > 0) {
+        scrollToIndex(activeIndex - 1);
     }
   };
 
@@ -261,7 +246,7 @@ const App: React.FC = () => {
     if (dotElement) {
         const dotIndexStr = dotElement.getAttribute('data-dot-index');
         const isActiveStr = dotElement.getAttribute('data-active');
-        const uniqueDotId = `${lastReadCharIndexRef.current}-${dotIndexStr}`;
+        const uniqueDotId = `${activeIndex}-${dotIndexStr}`;
 
         if (dotIndexStr && uniqueDotId !== lastTouchedDotRef.current) {
             const dotIndex = parseInt(dotIndexStr);
@@ -287,12 +272,20 @@ const App: React.FC = () => {
     }
   };
 
-  // Reset refs when word changes
+  // Reset when word changes
   useEffect(() => {
-    lastReadCharIndexRef.current = null;
     lastTouchedDotRef.current = null;
+    
     if (scrollContainerRef.current) {
-        scrollContainerRef.current.scrollTo({ left: 0, behavior: 'smooth' });
+        scrollContainerRef.current.scrollTo({ left: 0, behavior: 'auto' });
+    }
+    
+    if (activeText && activeText.length > 0) {
+        setActiveIndex(0);
+        // Small timeout to ensure DOM is ready before initial scroll (if needed)
+        setTimeout(() => scrollToIndex(0), 50);
+    } else {
+        setActiveIndex(-1);
     }
   }, [currentWord, displayMode]);
 
@@ -314,7 +307,7 @@ const App: React.FC = () => {
             </button>
 
             <button 
-                onClick={() => speak("Usa los botones o desliza la barra amarilla inferior para leer cada letra en español e inglés.")}
+                onClick={() => speak("Usa los botones o desliza la barra amarilla inferior para leer cada letra.")}
                 className="p-2 border border-white rounded-full hover:bg-gray-800"
                 aria-label="Ayuda"
             >
@@ -390,8 +383,8 @@ const App: React.FC = () => {
         <div className="absolute top-2 left-0 w-full flex justify-center items-center gap-6 z-20 pointer-events-none">
              <button 
                 onClick={handlePrev}
-                disabled={!currentWord}
-                className="pointer-events-auto p-3 bg-gray-800 rounded-full border border-gray-600 text-white active:bg-gray-700 disabled:opacity-30 disabled:border-gray-800 transition-colors shadow-lg"
+                disabled={activeIndex <= 0 || !currentWord}
+                className="pointer-events-auto p-3 bg-gray-800 rounded-full border border-gray-600 text-white active:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed disabled:border-gray-800 transition-colors shadow-lg"
                 aria-label="Letra anterior"
              >
                 <ChevronLeft size={24} />
@@ -403,8 +396,8 @@ const App: React.FC = () => {
 
              <button 
                 onClick={handleNext}
-                disabled={!currentWord}
-                className="pointer-events-auto p-3 bg-gray-800 rounded-full border border-gray-600 text-white active:bg-gray-700 disabled:opacity-30 disabled:border-gray-800 transition-colors shadow-lg"
+                disabled={activeIndex >= brailleData.length - 1 || !currentWord}
+                className="pointer-events-auto p-3 bg-gray-800 rounded-full border border-gray-600 text-white active:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed disabled:border-gray-800 transition-colors shadow-lg"
                 aria-label="Letra siguiente"
              >
                 <ChevronRight size={24} />
@@ -441,7 +434,7 @@ const App: React.FC = () => {
                             <BrailleCell 
                                 char={data.char} 
                                 dots={data.dots} 
-                                isActiveChar={true}
+                                isActiveChar={index === activeIndex}
                                 index={index}
                             />
                         </div>
