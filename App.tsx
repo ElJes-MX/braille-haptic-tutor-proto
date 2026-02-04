@@ -14,10 +14,13 @@ const App: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [audioFeedbackEnabled, setAudioFeedbackEnabled] = useState(true);
 
-  // Refs for touch tracking
+  // Refs for interactions
   const recordButtonRef = useRef<HTMLButtonElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const lastTouchedDotRef = useRef<string | null>(null);
   const lastReadCharIndexRef = useRef<number | null>(null);
+  const isScrollingRef = useRef<boolean>(false);
+  const scrollTimeoutRef = useRef<number | null>(null);
 
   // Helper to convert string to Braille objects
   const getBrailleData = (text: string) => {
@@ -111,6 +114,7 @@ const App: React.FC = () => {
         setTranslatedWord(word); 
         speak("Traducción no disponible.", 'es-ES');
         setDisplayMode('spanish');
+        setIsTranslating(false); // FIX: Ensure loading state is cleared
       } else {
         setTranslatedWord(translation);
         setIsTranslating(false);
@@ -119,7 +123,7 @@ const App: React.FC = () => {
       
     } catch (err) {
       setError("Error de conexión.");
-      setIsTranslating(false);
+      setIsTranslating(false); // FIX: Ensure loading state is cleared on error
     }
   };
 
@@ -147,36 +151,65 @@ const App: React.FC = () => {
     speak(newState ? "Sonido de puntos activado" : "Sonido de puntos desactivado");
   };
 
-  // --- GLOBAL TOUCH HANDLER FOR BRAILLE AREA ---
-  // This allows continuous sliding across letters and dots
+  // --- SCROLL READING LOGIC ---
+  const handleScroll = () => {
+    if (!scrollContainerRef.current) return;
+    
+    // Mark as scrolling to disable dot interaction temporarily
+    isScrollingRef.current = true;
+    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    scrollTimeoutRef.current = window.setTimeout(() => {
+        isScrollingRef.current = false;
+    }, 150);
+
+    const container = scrollContainerRef.current;
+    const containerCenter = container.getBoundingClientRect().left + container.offsetWidth / 2;
+    
+    const cells = Array.from(container.children) as HTMLElement[];
+    let closestCell: HTMLElement | null = null;
+    let minDistance = Infinity;
+
+    // Find the cell closest to the center
+    cells.forEach(cell => {
+      if (!cell.hasAttribute('data-char-index')) return;
+
+      const rect = cell.getBoundingClientRect();
+      const cellCenter = rect.left + rect.width / 2;
+      const distance = Math.abs(containerCenter - cellCenter);
+      
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestCell = cell;
+      }
+    });
+
+    // If we have a central cell
+    if (closestCell && minDistance < 100) { // Tolerance
+       const index = parseInt((closestCell as HTMLElement).getAttribute('data-char-index') || '-1');
+       const char = (closestCell as HTMLElement).getAttribute('data-braille-char');
+       
+       if (index !== -1 && index !== lastReadCharIndexRef.current) {
+          lastReadCharIndexRef.current = index;
+          if (char) {
+             speak(char.toUpperCase(), displayMode === 'spanish' ? 'es-ES' : 'en-US', 1.2);
+             if (navigator.vibrate) navigator.vibrate(20);
+          }
+       }
+    }
+  };
+
+  // --- TOUCH DOT INTERACTION ---
   const handleBrailleTouch = (e: React.TouchEvent) => {
-    // We don't preventDefault globally here because we might want to snap-scroll
-    // However, BrailleCell has touch-action: none which handles the 'locking' inside cells
+    // If scrolling rapidly, ignore dot exploration to avoid noise
+    // But allow it if the user is deliberately touching/holding
+    // We check this with a simple heuristic, but since we rely on 'touchMove', 
+    // real scrolling is handled by browser. We just need to check if we are hitting a dot.
     
     const touch = e.touches[0];
     const target = document.elementFromPoint(touch.clientX, touch.clientY);
 
     if (!target) return;
 
-    // 1. DETECT LETTER CHANGE (Read Letter Name)
-    const charContainer = target.closest('[data-char-index]');
-    if (charContainer) {
-        const charIndex = parseInt(charContainer.getAttribute('data-char-index') || "-1");
-        const charName = charContainer.getAttribute('data-braille-char');
-        
-        if (charIndex !== -1 && charIndex !== lastReadCharIndexRef.current) {
-            lastReadCharIndexRef.current = charIndex;
-            // Speak the letter name clearly
-            if (charName) {
-                speak(charName.toUpperCase(), displayMode === 'spanish' ? 'es-ES' : 'en-US', 1.2);
-                if (navigator.vibrate) navigator.vibrate(15); // Tiny tick on letter change
-            }
-        }
-    } else {
-        lastReadCharIndexRef.current = null;
-    }
-
-    // 2. DETECT DOT INTERACTION (Haptics + Audio)
     const dotElement = target.closest('[data-dot-index]');
     
     if (dotElement) {
@@ -190,16 +223,17 @@ const App: React.FC = () => {
             
             lastTouchedDotRef.current = uniqueDotId;
             
-            // Haptics
+            // Haptics (Always)
             if (navigator.vibrate) {
                 navigator.vibrate(isActive ? 50 : 10);
             }
 
-            // Audio (if enabled)
+            // Audio (Only if active and enabled)
             if (audioFeedbackEnabled && isActive) {
+                // Use a very short utterance for dots to avoid overlapping with letter names
                 const u = new SpeechSynthesisUtterance(`${dotIndex + 1}`);
                 u.lang = 'es-ES';
-                u.rate = 2.0; 
+                u.rate = 2.5; 
                 window.speechSynthesis.speak(u);
             }
         }
@@ -212,8 +246,11 @@ const App: React.FC = () => {
   useEffect(() => {
     lastReadCharIndexRef.current = null;
     lastTouchedDotRef.current = null;
+    // Scroll to start
+    if (scrollContainerRef.current) {
+        scrollContainerRef.current.scrollTo({ left: 0, behavior: 'smooth' });
+    }
   }, [currentWord, displayMode]);
-
 
   const activeText = displayMode === 'spanish' ? currentWord : translatedWord;
   const brailleData = getBrailleData(activeText || "");
@@ -236,7 +273,7 @@ const App: React.FC = () => {
             </button>
 
             <button 
-                onClick={() => speak("Desliza el dedo por la parte inferior. Si tocas una letra, te la diré. Si tocas un punto, vibrará.")}
+                onClick={() => speak("Desliza horizontalmente la parte inferior para leer las letras. Toca los puntos para explorarlos.")}
                 className="p-2 border border-white rounded-full hover:bg-gray-800"
                 aria-label="Ayuda"
             >
@@ -303,36 +340,48 @@ const App: React.FC = () => {
         </div>
       </section>
 
-      {/* 3. Braille Area with Snap Scrolling & Global Touch Tracking */}
+      {/* 3. Braille Area - Scroll Reader */}
       <section 
-        className="flex-grow flex flex-col bg-gray-900 border-t-4 border-gray-800 shadow-inner overflow-hidden relative"
+        className="flex-grow flex flex-col bg-gray-900 border-t-4 border-gray-800 shadow-inner relative"
         aria-label="Zona de lectura Braille"
       >
         <div className="absolute top-2 left-0 w-full text-center pointer-events-none z-10">
-             <span className="text-xs text-gray-500 uppercase tracking-widest bg-gray-900 px-2 rounded">Tablero Braille</span>
+             <span className="text-xs text-gray-500 uppercase tracking-widest bg-gray-900 px-2 rounded opacity-50">Desliza para leer</span>
         </div>
 
+        {/* Central Focus Indicator / Selection Area */}
+        <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-40 h-64 border-4 border-yellow-500/30 rounded-2xl pointer-events-none z-0"></div>
+
         <div 
-            // Unified touch handler on the container
+            ref={scrollContainerRef}
+            // Logic for scrolling reading
+            onScroll={handleScroll}
+            // Logic for dot scrubbing interaction
             onTouchStart={handleBrailleTouch}
             onTouchMove={handleBrailleTouch}
-            onTouchEnd={() => { lastReadCharIndexRef.current = null; lastTouchedDotRef.current = null; }}
-            // snap-x snap-mandatory: Forces the view to snap to letters, stabilizing the board
-            className="flex-1 overflow-x-auto overflow-y-hidden flex items-center px-[35vw] hide-scrollbar snap-x snap-mandatory"
+            onTouchEnd={() => { lastTouchedDotRef.current = null; }}
+            
+            // Snap scrolling for discrete letter feel
+            className="flex-1 overflow-x-auto overflow-y-hidden flex items-center px-[50vw] hide-scrollbar snap-x snap-mandatory"
         >
-             <div className="flex gap-12 items-center min-w-full pl-4 pr-4">
+             <div className="flex gap-20 items-center min-w-full">
                 {currentWord ? (
                     brailleData.map((data, index) => (
-                        <BrailleCell 
-                            key={`${displayMode}-${index}-${data.char}`} 
-                            char={data.char} 
-                            dots={data.dots} 
-                            isActiveChar={true}
-                            index={index}
-                        />
+                        <div key={`${displayMode}-${index}`} className="relative">
+                            <BrailleCell 
+                                char={data.char} 
+                                dots={data.dots} 
+                                isActiveChar={true}
+                                index={index}
+                            />
+                            {/* Visual guide below cell */}
+                            <div className="absolute -bottom-8 left-0 w-full text-center text-gray-600 text-xs">
+                                Letra {index + 1}
+                            </div>
+                        </div>
                     ))
                 ) : (
-                    <div className="w-full text-center opacity-20 snap-center">
+                    <div className="w-full text-center opacity-20 snap-center min-w-[200px]">
                         <div className="text-6xl mb-2">⠃⠗⠇</div>
                         <p className="text-sm">Área Táctil</p>
                     </div>

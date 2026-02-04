@@ -9,12 +9,11 @@ interface BrailleCellProps {
 }
 
 const BrailleCell: React.FC<BrailleCellProps> = ({ char, dots, isActiveChar, index }) => {
-  // Note: Touch logic is now handled by the parent container in App.tsx 
-  // using document.elementFromPoint to allow continuous sliding between letters.
+  // Touch logic is handled by the parent container in App.tsx 
 
   return (
     <div 
-      // data attributes allow the parent touch handler to identify what is being touched
+      // data attributes allow the parent handler to identify what is being touched
       data-braille-char={char}
       data-char-index={index}
       className={`
@@ -23,24 +22,21 @@ const BrailleCell: React.FC<BrailleCellProps> = ({ char, dots, isActiveChar, ind
         transition-colors duration-300
         ${isActiveChar ? 'border-high-contrast-text bg-gray-900' : 'border-gray-700 bg-gray-800 opacity-50'}
       `}
-      // touch-action: none is CRITICAL. It tells the browser "Don't scroll when I drag inside this box".
-      // This fixes the "letters not fixed" issue by locking scroll while exploring dots.
-      style={{ minWidth: '140px', touchAction: 'none' }} 
+      // Re-enabled touch actions (removed touchAction: none) to allow scrolling interaction
+      style={{ minWidth: '160px' }} 
       aria-label={`Carácter Braille para la letra ${char}`}
     >
-      <div className="text-5xl font-bold mb-4 text-white uppercase font-sans pointer-events-none">{char}</div>
+      <div className="text-6xl font-bold mb-6 text-white uppercase font-sans pointer-events-none">{char}</div>
       
       {/* Grid for dots: 2 columns, 3 rows */}
-      <div className="grid grid-cols-2 gap-x-8 gap-y-6 w-full px-2 justify-items-center pointer-events-none">
+      <div className="grid grid-cols-2 gap-x-8 gap-y-6 w-full px-4 justify-items-center pointer-events-none">
         {dots.map((isActive, dotIndex) => (
           <div
             key={dotIndex}
-            // Markers for the global touch handler to detect dots
             data-dot-index={dotIndex}
             data-active={isActive ? "true" : "false"}
-            // Actual visual dot
             className={`
-              w-10 h-10 rounded-full border-2 
+              w-12 h-12 rounded-full border-4 
               flex items-center justify-center transition-all duration-100 pointer-events-auto
               ${isActive 
                 ? 'bg-braille-active border-braille-active shadow-[0_0_15px_rgba(56,189,248,0.6)]' 
