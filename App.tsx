@@ -452,7 +452,7 @@ const App: React.FC = () => {
             onTouchEnd={() => { lastTouchedDotRef.current = null; }}
             
             // Snap scrolling
-            className="flex-1 overflow-x-auto overflow-y-hidden flex items-center hide-scrollbar snap-x snap-mandatory"
+            className="flex-1 overflow-hidden flex items-center hide-scrollbar snap-x snap-mandatory"
         >
              <div className="flex items-center">
                 {/* Spacer Start: Half screen width minus half cell width (approx 80px) to center first item */}

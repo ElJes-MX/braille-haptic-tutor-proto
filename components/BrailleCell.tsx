@@ -28,8 +28,8 @@ const BrailleCell: React.FC<BrailleCellProps> = ({ char, dots, isActiveChar, ind
     >
       <div className="text-6xl font-bold mb-6 text-white uppercase font-sans pointer-events-none">{char}</div>
       
-      {/* Grid for dots: 2 columns, 3 rows */}
-      <div className="grid grid-cols-2 gap-x-8 gap-y-6 w-full px-4 justify-items-center pointer-events-none">
+      {/* Grid for dots: 2 columns, 3 rows, filled by column (1,2,3 then 4,5,6) */}
+      <div className="grid grid-cols-2 grid-rows-3 grid-flow-col gap-x-8 gap-y-6 w-full px-4 justify-items-center pointer-events-none">
         {dots.map((isActive, dotIndex) => (
           <div
             key={dotIndex}
